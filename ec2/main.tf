@@ -1,4 +1,3 @@
-# EC2 Module - main.tf
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
   owners      = ["amazon"]
@@ -7,51 +6,52 @@ data "aws_ami" "amazon_linux_2" {
     name   = "name"
     values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
+}
 
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
   filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
   }
+}
+
+resource "aws_security_group" "ec2_sg" {
+  name        = "${var.instance_name}-sg"
+  description = "Security group for EC2"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_key_pair" "main" {
+  key_name   = "${var.instance_name}-key"
+  public_key = file(var.public_key_path)
 }
 
 resource "aws_instance" "main" {
-  ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.amazon_linux_2.id
+  ami                    = data.aws_ami.amazon_linux_2.id
   instance_type          = var.instance_type
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [var.security_group_id]
-  key_name               = var.key_name
-
-  root_block_device {
-    volume_type           = "gp3"
-    volume_size           = 20
-    delete_on_termination = true
-    
-    tags = {
-      Name = "${var.instance_name}-root-volume"
-    }
-  }
-
-  monitoring              = var.monitoring_enabled
-  associate_public_ip_address = var.associate_public_ip
+  subnet_id              = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  key_name               = aws_key_pair.main.key_name
 
   tags = {
-    Name        = var.instance_name
-    Environment = var.environment
+    Name = var.instance_name
   }
-
-  depends_on = [var.depends_on_resources]
-}
-
-# Optional: Elastic IP for static public IP
-resource "aws_eip" "main" {
-  count    = var.allocate_elastic_ip ? 1 : 0
-  instance = aws_instance.main.id
-  domain   = "vpc"
-
-  tags = {
-    Name        = "${var.instance_name}-eip"
-    Environment = var.environment
-  }
-
-  depends_on = [aws_instance.main]
 }
